@@ -1,7 +1,8 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Unit, fmt, loadUnit, toLb } from '../lib/units';
 
 type Sex = 'Male' | 'Female' | 'Prefer not to say';
 type Goal = 'bulk' | 'maintain' | 'cut';
@@ -35,31 +36,43 @@ export default function Macros() {
   const router = useRouter();
   const params = useLocalSearchParams<{ bodyweight?: string; age?: string; sex?: string }>();
 
-  const [weight, setWeight] = useState(params.bodyweight ?? '');
+  const [unit, setUnit] = useState<Unit>('lb');
+  const [weight, setWeight] = useState('');
   const [age, setAge] = useState(params.age ?? '');
   const [sex, setSex] = useState<Sex>(
     params.sex === 'Male' || params.sex === 'Female' ? params.sex : 'Prefer not to say'
   );
   const [ft, setFt] = useState('');
   const [inch, setInch] = useState('');
+  const [cm, setCm] = useState('');
   const [activity, setActivity] = useState('light');
   const [goal, setGoal] = useState<Goal>('bulk');
+
+  useEffect(() => {
+    const run = async () => {
+      const u = await loadUnit();
+      setUnit(u);
+      const lb = parseFloat(params.bodyweight ?? '');
+      if (lb > 0) setWeight(fmt(lb, u));
+    };
+    run();
+  }, []);
 
   const ageNum = parseFloat(age);
   const minor = ageNum > 0 && ageNum < 18;
   const effectiveGoal: Goal = minor && goal === 'cut' ? 'maintain' : goal;
 
   const result = useMemo(() => {
-    const lb = parseFloat(weight);
+    const lb = toLb(parseFloat(weight), unit);
     const a = parseFloat(age);
-    const totalIn = (parseFloat(ft) || 0) * 12 + (parseFloat(inch) || 0);
+    const totalIn = unit === 'kg' ? (parseFloat(cm) || 0) / 2.54 : (parseFloat(ft) || 0) * 12 + (parseFloat(inch) || 0);
     if (!(lb >= 70 && lb <= 600)) return null;
     if (!(a >= 13 && a <= 90)) return null;
     if (!(totalIn >= 48 && totalIn <= 90)) return null;
 
     const kg = lb * 0.45359237;
-    const cm = totalIn * 2.54;
-    const base = 10 * kg + 6.25 * cm - 5 * a;
+    const heightCm = totalIn * 2.54;
+    const base = 10 * kg + 6.25 * heightCm - 5 * a;
     const bmr = sex === 'Male' ? base + 5 : sex === 'Female' ? base - 161 : base - 78;
     const factor = ACTIVITY.find((x) => x.id === activity)?.factor ?? 1.375;
     const maintenance = bmr * factor;
@@ -91,7 +104,7 @@ export default function Macros() {
       fPct: Math.round(((fat * 9) / calories) * 100),
       cPct: Math.round(((carbs * 4) / calories) * 100),
     };
-  }, [weight, age, ft, inch, sex, activity, effectiveGoal]);
+  }, [weight, age, ft, inch, cm, unit, sex, activity, effectiveGoal]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -107,8 +120,8 @@ export default function Macros() {
 
         <View style={styles.threeCol}>
           <View style={{ flex: 1.2 }}>
-            <Text style={styles.label}>WEIGHT (LB)</Text>
-            <TextInput style={styles.input} value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder="180" placeholderTextColor="#444450" />
+            <Text style={styles.label}>WEIGHT ({unit.toUpperCase()})</Text>
+            <TextInput style={styles.input} value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder={unit === 'kg' ? '80' : '180'} placeholderTextColor="#444450" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>AGE</Text>
@@ -117,16 +130,25 @@ export default function Macros() {
         </View>
 
         <Text style={styles.label}>HEIGHT</Text>
-        <View style={styles.threeCol}>
-          <View style={styles.unitWrap}>
-            <TextInput style={styles.unitInput} value={ft} onChangeText={setFt} keyboardType="number-pad" placeholder="5" placeholderTextColor="#444450" />
-            <Text style={styles.unit}>ft</Text>
+        {unit === 'kg' ? (
+          <View style={styles.threeCol}>
+            <View style={styles.unitWrap}>
+              <TextInput style={styles.unitInput} value={cm} onChangeText={setCm} keyboardType="decimal-pad" placeholder="178" placeholderTextColor="#444450" />
+              <Text style={styles.unit}>cm</Text>
+            </View>
           </View>
-          <View style={styles.unitWrap}>
-            <TextInput style={styles.unitInput} value={inch} onChangeText={setInch} keyboardType="number-pad" placeholder="10" placeholderTextColor="#444450" />
-            <Text style={styles.unit}>in</Text>
+        ) : (
+          <View style={styles.threeCol}>
+            <View style={styles.unitWrap}>
+              <TextInput style={styles.unitInput} value={ft} onChangeText={setFt} keyboardType="number-pad" placeholder="5" placeholderTextColor="#444450" />
+              <Text style={styles.unit}>ft</Text>
+            </View>
+            <View style={styles.unitWrap}>
+              <TextInput style={styles.unitInput} value={inch} onChangeText={setInch} keyboardType="number-pad" placeholder="10" placeholderTextColor="#444450" />
+              <Text style={styles.unit}>in</Text>
+            </View>
           </View>
-        </View>
+        )}
 
         <Text style={styles.label}>SEX (FOR THE CALORIE FORMULA)</Text>
         <View style={styles.chipRow}>

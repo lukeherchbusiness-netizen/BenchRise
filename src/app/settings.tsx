@@ -3,11 +3,9 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { loadUnit, Unit, UNIT_KEY } from '../lib/units';
 
-const UNIT_KEY = 'benchrise.unit.v1';
 const DATA_KEYS = ['benchrise.answers.v1', 'benchrise.log.v1', UNIT_KEY];
-
-type Unit = 'lb' | 'kg';
 
 export default function Settings() {
   const router = useRouter();
@@ -15,15 +13,7 @@ export default function Settings() {
   const [deleted, setDeleted] = useState(false);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(UNIT_KEY);
-        if (saved === 'kg' || saved === 'lb') setUnit(saved);
-      } catch (e) {
-        // ignore
-      }
-    };
-    load();
+    loadUnit().then(setUnit);
   }, []);
 
   const pickUnit = (u: Unit) => {
@@ -65,7 +55,7 @@ export default function Settings() {
         <Text style={styles.tag}>BENCHRISE</Text>
         <Text style={styles.title}>SETTINGS</Text>
 
-        <Text style={styles.label}>PLATE CALCULATOR UNITS</Text>
+        <Text style={styles.label}>UNITS</Text>
         <View style={styles.chipRow}>
           {(['lb', 'kg'] as Unit[]).map((u) => (
             <Pressable key={u} style={[styles.chip, unit === u ? styles.chipOn : null]} onPress={() => pickUnit(u)}>
@@ -74,7 +64,7 @@ export default function Settings() {
           ))}
         </View>
         <Text style={styles.hint}>
-          This switches the plate calculator. Your plan, log, and macros are still in pounds for now.
+          Applies to your plan, workout log, macros, leaderboard, and plates. Switching never changes your saved lifts, only how they're shown.
         </Text>
 
         <Text style={styles.label}>YOUR DATA</Text>

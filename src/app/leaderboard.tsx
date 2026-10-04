@@ -1,14 +1,16 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Unit, fmt, loadUnit, toDisplay, toLb } from '../lib/units';
 
 type Division = 'Raw' | 'Wraps';
 type SortBy = 'lbs' | 'pct';
 type Filter = 'All' | Division;
 type Proof = { uri: string; type: 'image' | 'video' };
 type Profile = { username: string; avatar?: string };
+// Weights are stored in pounds and converted for display
 type Entry = {
   id: string;
   username: string;
@@ -69,6 +71,7 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
 
 export default function Leaderboard() {
   const router = useRouter();
+  const [unit, setUnit] = useState<Unit>('lb');
   const [entries, setEntries] = useState<Entry[]>(SAMPLE);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>('lbs');
@@ -81,6 +84,10 @@ export default function Leaderboard() {
   const [division, setDivision] = useState<Division>('Raw');
   const [proof, setProof] = useState<Proof | null>(null);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadUnit().then(setUnit);
+  }, []);
 
   const ranked = useMemo(() => {
     const list = entries.filter((e) => filter === 'All' || e.division === filter);
@@ -133,8 +140,8 @@ export default function Leaderboard() {
 
   const submit = () => {
     const handle = username.trim().toLowerCase();
-    const s = parseFloat(start);
-    const p = parseFloat(pr);
+    const s = toLb(parseFloat(start), unit);
+    const p = toLb(parseFloat(pr), unit);
     if (!/^[a-z0-9_.]{3,20}$/.test(handle)) {
       setError('Username must be 3 to 20 characters: letters, numbers, dots, or underscores.');
       return;
@@ -168,6 +175,9 @@ export default function Leaderboard() {
     setShowForm(false);
   };
 
+  const gainText = (e: Entry) =>
+    sortBy === 'lbs' ? String(Math.round(toDisplay(gain(e), unit) * 10) / 10) : pctGain(e).toFixed(1);
+
   return (
     <SafeAreaView style={styles.safe}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -186,7 +196,7 @@ export default function Leaderboard() {
 
         <Text style={styles.label}>RANK BY</Text>
         <View style={styles.chipRow}>
-          <Chip label="Most lbs gained" on={sortBy === 'lbs'} onPress={() => setSortBy('lbs')} />
+          <Chip label={`Most ${unit} gained`} on={sortBy === 'lbs'} onPress={() => setSortBy('lbs')} />
           <Chip label="Most % gained" on={sortBy === 'pct'} onPress={() => setSortBy('pct')} />
         </View>
 
@@ -207,7 +217,7 @@ export default function Leaderboard() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.name} numberOfLines={1}>@{e.username}</Text>
                 <Text style={styles.meta}>
-                  {e.division}  |  {e.start} {'>'} {e.pr} lb
+                  {e.division}  |  {fmt(e.start, unit)} {'>'} {fmt(e.pr, unit)} {unit}
                 </Text>
                 <Text style={e.verified ? styles.badgeOk : styles.badgePending}>
                   {e.verified ? 'VERIFIED' : 'PENDING REVIEW'}
@@ -222,8 +232,8 @@ export default function Leaderboard() {
                 </View>
               )}
               <View style={styles.gainBox}>
-                <Text style={styles.gain}>+{sortBy === 'lbs' ? gain(e) : pctGain(e).toFixed(1)}</Text>
-                <Text style={styles.gainUnit}>{sortBy === 'lbs' ? 'lb' : '%'}</Text>
+                <Text style={styles.gain}>+{gainText(e)}</Text>
+                <Text style={styles.gainUnit}>{sortBy === 'lbs' ? unit : '%'}</Text>
               </View>
             </View>
           ))}
@@ -260,12 +270,12 @@ export default function Leaderboard() {
 
             <View style={styles.twoCol}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>STARTING MAX (LB)</Text>
-                <TextInput style={styles.input} value={start} onChangeText={setStart} keyboardType="numeric" placeholder="225" placeholderTextColor="#444450" />
+                <Text style={styles.label}>STARTING MAX ({unit.toUpperCase()})</Text>
+                <TextInput style={styles.input} value={start} onChangeText={setStart} keyboardType="decimal-pad" placeholder={unit === 'kg' ? '100' : '225'} placeholderTextColor="#444450" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.label}>NEW PR (LB)</Text>
-                <TextInput style={styles.input} value={pr} onChangeText={setPr} keyboardType="numeric" placeholder="245" placeholderTextColor="#444450" />
+                <Text style={styles.label}>NEW PR ({unit.toUpperCase()})</Text>
+                <TextInput style={styles.input} value={pr} onChangeText={setPr} keyboardType="decimal-pad" placeholder={unit === 'kg' ? '110' : '245'} placeholderTextColor="#444450" />
               </View>
             </View>
 
