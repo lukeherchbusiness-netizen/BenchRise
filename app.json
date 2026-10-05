@@ -8,6 +8,13 @@
     "scheme": "benchrise",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#050507",
+    "ios": {
+      "bundleIdentifier": "com.lukeherch.benchrise",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#050507",
@@ -15,7 +22,11 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -23,6 +34,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BenchRise uses the camera to scan food barcodes."
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -35,6 +52,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6207f941-fd8c-4825-8bfb-5c5bb7b2a89c"
+      }
+    },
+    "owner": "lukeherch1"
   }
 }
