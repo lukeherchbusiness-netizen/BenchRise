@@ -1,17 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getPro, usePro } from './purchases';
 
-export const PRO_KEY = 'benchrise.pro.v1';
+export { usePro };
 
+// Old helpers kept so foods.tsx still compiles. loadPro now asks the real subscription.
 export async function loadPro(): Promise<boolean> {
-  try {
-    return (await AsyncStorage.getItem(PRO_KEY)) === '1';
-  } catch {
-    return false;
-  }
+  return getPro();
 }
 
-export async function savePro(value: boolean): Promise<void> {
-  try {
-    await AsyncStorage.setItem(PRO_KEY, value ? '1' : '0');
-  } catch {}
-}
+// No longer does anything: Pro can only come from a real purchase now.
+export async function savePro(_value: boolean): Promise<void> {}

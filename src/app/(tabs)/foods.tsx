@@ -4,7 +4,8 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { loadPro, savePro } from '../../lib/pro';
+import Paywall from '../../components/Paywall';
+import { getPro, usePro } from '../../lib/purchases';
 
 type Food = { name: string; serving: string; cal: number; p: number; c: number; f: number };
 type Entry = Food & { id: string; servings: number };
@@ -13,6 +14,14 @@ type Targets = { cal: number; p: number; c: number; f: number };
 const LOG_KEY = 'benchrise.foodlog.v1';
 const TARGET_KEY = 'benchrise.foodtargets.v1';
 const DEFAULT_TARGETS: Targets = { cal: 2800, p: 180, c: 300, f: 80 };
+
+const FOOD_PERKS = [
+  'Scan barcodes for exact nutrition',
+  'Search millions of foods',
+  'Add your own custom foods',
+  'Live progress bars for every macro',
+  'Plus every week of your program and all lessons',
+];
 
 const F = (name: string, serving: string, cal: number, p: number, c: number, f: number): Food => ({
   name, serving, cal, p, c, f,
@@ -129,7 +138,8 @@ function Bar({ label, value, target, color, unit }: { label: string; value: numb
 }
 
 export default function FoodsScreen() {
-  const [isPro, setIsPro] = useState<boolean | null>(null);
+  const isPro = usePro();
+  const [ready, setReady] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [targets, setTargets] = useState<Targets>(DEFAULT_TARGETS);
   const [query, setQuery] = useState('');
@@ -153,7 +163,7 @@ export default function FoodsScreen() {
     useCallback(() => {
       let alive = true;
       (async () => {
-        const pro = await loadPro();
+        await getPro();
         let list: Entry[] = [];
         let t = DEFAULT_TARGETS;
         try {
@@ -166,9 +176,9 @@ export default function FoodsScreen() {
           if (tr) t = { ...DEFAULT_TARGETS, ...JSON.parse(tr) };
         } catch {}
         if (alive) {
-          setIsPro(pro);
           setEntries(list);
           setTargets(t);
+          setReady(true);
         }
       })();
       return () => {
@@ -221,11 +231,6 @@ export default function FoodsScreen() {
     setCP('');
     setCC('');
     setCF('');
-  };
-
-  const unlock = async () => {
-    await savePro(true);
-    setIsPro(true);
   };
 
   const searchOnline = async () => {
@@ -301,7 +306,7 @@ export default function FoodsScreen() {
   const q = query.trim().toLowerCase();
   const results = (q ? FOODS.filter((f) => f.name.toLowerCase().includes(q)) : FOODS.slice(0, 8)).slice(0, 12);
 
-  if (isPro === null) {
+  if (!ready) {
     return <SafeAreaView style={styles.safe} />;
   }
 
@@ -310,21 +315,10 @@ export default function FoodsScreen() {
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.pad}>
           <Text style={styles.title}>FOOD TRACKER</Text>
-          <View style={styles.lockCard}>
-            <Text style={styles.lockBadge}>PRO</Text>
-            <Text style={styles.lockTitle}>Hit your macros every day</Text>
-            <Text style={styles.lockText}>
-              Log what you eat, see calories, protein, carbs and fat add up live, and track your progress against your daily targets.
-            </Text>
-            <Text style={styles.lockPoint}>• Scan barcodes for exact nutrition</Text>
-            <Text style={styles.lockPoint}>• Search millions of foods</Text>
-            <Text style={styles.lockPoint}>• Add your own custom foods</Text>
-            <Text style={styles.lockPoint}>• Live progress bars for every macro</Text>
-            <Pressable style={styles.cta} onPress={unlock}>
-              <Text style={styles.ctaText}>UNLOCK PRO · $10/MONTH</Text>
-            </Pressable>
-            <Text style={styles.fine}>Demo mode: nothing is charged yet.</Text>
-          </View>
+          <Text style={styles.lockText}>
+            Log what you eat, see calories, protein, carbs and fat add up live, and track your progress against your daily targets.
+          </Text>
+          <Paywall title="Hit your macros every day" perks={FOOD_PERKS} />
         </ScrollView>
       </SafeAreaView>
     );
@@ -558,11 +552,7 @@ const styles = StyleSheet.create({
   onlineBtn: { backgroundColor: '#1c1c24', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginBottom: 8, borderColor: '#262630', borderWidth: 1 },
   onlineBtnText: { color: '#fff', fontSize: 13, fontWeight: '900', letterSpacing: 1 },
   fine: { color: '#5f5f6a', fontSize: 12, marginTop: 10, lineHeight: 17 },
-  lockCard: { backgroundColor: '#0f0f14', borderColor: '#ff4d2e', borderWidth: 1, borderRadius: 20, padding: 20 },
-  lockBadge: { color: '#050507', backgroundColor: '#ffb02e', alignSelf: 'flex-start', fontWeight: '900', fontSize: 12, letterSpacing: 2, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
-  lockTitle: { color: '#fff', fontSize: 24, fontWeight: '900', marginTop: 14 },
-  lockText: { color: '#a8a8b3', fontSize: 14, lineHeight: 20, marginTop: 8, marginBottom: 10 },
-  lockPoint: { color: '#e6e6ec', fontSize: 14, fontWeight: '700', marginTop: 6 },
+  lockText: { color: '#a8a8b3', fontSize: 14, lineHeight: 20, marginBottom: 14 },
   scanWrap: { flex: 1, backgroundColor: '#000' },
   scanOverlay: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 20, paddingBottom: 40, backgroundColor: 'rgba(5,5,7,0.85)' },
   scanMsg: { color: '#fff', fontSize: 15, fontWeight: '800', textAlign: 'center' },

@@ -3,9 +3,10 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Paywall from '../../components/Paywall';
+import { usePro } from '../../lib/purchases';
 
 const APP_NAME = 'BenchRise';
-const PRICES = { year: '$59.99 / year', month: '$9.99 / month' }; // placeholder prices
 const STORAGE_KEY = 'benchrise.answers.v1';
 
 type Question = { id: string; q: string; kind: 'choice' | 'number'; options?: string[]; unit?: string; placeholder?: string };
@@ -35,7 +36,7 @@ const FEATURES = [
   ['03', 'Prove your PRs', 'Upload a video of every PR and climb the improvement leaderboard.'],
 ];
 
-const PERKS = ['Every week of your full program', 'Auto deloads and test week attempts', 'All technique lessons', 'Leaderboard and PR video uploads'];
+const PERKS = ['Every week of your full program', 'Auto deloads and test week attempts', 'All technique lessons', 'Food tracker with barcode scan', 'Leaderboard and PR video uploads'];
 
 const KIND_COLOR: Record<Kind, string> = { build: '#ff4d2e', deload: '#4da3ff', taper: '#ffb02e', test: '#3ddc97' };
 const KIND_LABEL: Record<Kind, string> = { build: 'Build week', deload: 'Deload week', taper: 'Taper week', test: 'Test week' };
@@ -166,12 +167,11 @@ function buildPlan(a: Record<string, string>): Plan {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const pro = usePro();
   const [loaded, setLoaded] = useState(false);
   const [step, setStep] = useState(-1);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [weekIdx, setWeekIdx] = useState(0);
-  const [pro, setPro] = useState(false);
-  const [billing, setBilling] = useState<'year' | 'month'>('year');
 
   const total = QUESTIONS.length;
 
@@ -243,41 +243,13 @@ export default function HomeScreen() {
       },
     });
 
-  // DEMO ONLY: this flips a switch and charges nothing.
-  // Replace with a real RevenueCat purchase call later.
-  const unlock = () => setPro(true);
-
   const nextStyle = [styles.button, styles.next, !canContinue ? styles.disabled : null];
 
   if (!loaded) {
     return <SafeAreaView style={styles.safe} />;
   }
 
-  const paywall = (
-    <View style={styles.paywall}>
-      <Text style={styles.proTag}>BENCHRISE PRO</Text>
-      <Text style={styles.paywallTitle}>Unlock your full program</Text>
-      {PERKS.map((p) => (
-        <Text key={p} style={styles.perk}>+  {p}</Text>
-      ))}
-      <View style={styles.planRow}>
-        <Pressable style={[styles.planBox, billing === 'year' ? styles.planOn : null]} onPress={() => setBilling('year')}>
-          <Text style={styles.badge}>BEST VALUE</Text>
-          <Text style={styles.planName}>Yearly</Text>
-          <Text style={styles.planPrice}>{PRICES.year}</Text>
-        </Pressable>
-        <Pressable style={[styles.planBox, billing === 'month' ? styles.planOn : null]} onPress={() => setBilling('month')}>
-          <Text style={styles.badgeOff}> </Text>
-          <Text style={styles.planName}>Monthly</Text>
-          <Text style={styles.planPrice}>{PRICES.month}</Text>
-        </Pressable>
-      </View>
-      <Pressable style={styles.button} onPress={unlock}>
-        <Text style={styles.buttonText}>Unlock all {plan?.totalWeeks} weeks</Text>
-      </Pressable>
-      <Text style={styles.fine}>Demo mode: no real charge yet. Subscriptions will renew until cancelled. Restore purchases, Terms, and Privacy links go here.</Text>
-    </View>
-  );
+  const paywall = <Paywall title="Unlock your full program" perks={PERKS} />;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -537,18 +509,6 @@ const styles = StyleSheet.create({
   exRow: { paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#1a1a22' },
   exName: { color: '#fff', fontSize: 16, fontWeight: '700' },
   exDetail: { color: '#ff8a70', fontSize: 15, fontWeight: '700', marginTop: 2 },
-  paywall: { backgroundColor: '#0d0d12', borderRadius: 22, borderWidth: 1.5, borderColor: '#ff4d2e', padding: 22, marginTop: 6, ...glow, shadowOpacity: 0.3 },
-  proTag: { color: '#ffb02e', fontSize: 11, fontWeight: '900', letterSpacing: 3 },
-  paywallTitle: { color: '#fff', fontSize: 28, fontWeight: '900', lineHeight: 32, marginTop: 8, marginBottom: 14 },
-  perk: { color: '#cfcfd6', fontSize: 15, fontWeight: '600', marginBottom: 8 },
-  planRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
-  planBox: { flex: 1, borderWidth: 1.5, borderColor: '#2a2a34', borderRadius: 14, padding: 14, backgroundColor: '#101016' },
-  planOn: { borderColor: '#ff4d2e', backgroundColor: '#24120d' },
-  badge: { color: '#050507', backgroundColor: '#ffb02e', fontSize: 10, fontWeight: '900', alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, overflow: 'hidden', marginBottom: 6 },
-  badgeOff: { fontSize: 10, paddingVertical: 2, marginBottom: 6 },
-  planName: { color: '#fff', fontSize: 17, fontWeight: '900' },
-  planPrice: { color: '#9a9aa6', fontSize: 13, fontWeight: '600', marginTop: 2 },
-  fine: { color: '#6a6a75', fontSize: 11, lineHeight: 16, marginTop: 14 },
   ghost: { borderWidth: 1.5, borderColor: '#2c2c36', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 12 },
   ghostRow: { flexDirection: 'row', gap: 10 },
   ghostHalf: { flex: 1 },
