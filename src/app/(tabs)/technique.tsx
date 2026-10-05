@@ -1,7 +1,19 @@
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Paywall from '../../components/Paywall';
+import { usePro } from '../../lib/purchases';
+
+const ANSWERS_KEY = 'benchrise.answers.v1';
+
+const LESSON_PERKS = [
+  'All technique lessons',
+  'Every week of your full program',
+  'Food tracker with barcode scan',
+  'Leaderboard and PR video uploads',
+];
 
 type Lesson = {
   id: string;
@@ -188,21 +200,35 @@ const LESSONS: Lesson[] = [
 ];
 
 export default function Technique() {
-  const router = useRouter();
-  const params = useLocalSearchParams<{ pro?: string; sticking?: string }>();
-  const pro = params.pro === '1';
-  const sticking = params.sticking ?? '';
-  const hasSticking = sticking !== '' && sticking !== 'Not sure';
+  const params = useLocalSearchParams<{ sticking?: string }>();
+  const pro = usePro();
+  const [saved, setSaved] = useState('');
   const [open, setOpen] = useState<string | null>('setup');
+
+  // Read the sticking point from your saved plan answers
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      AsyncStorage.getItem(ANSWERS_KEY)
+        .then((raw) => {
+          if (!raw || !alive) return;
+          const a = JSON.parse(raw) as Record<string, string>;
+          setSaved(a.sticking ?? '');
+        })
+        .catch(() => {});
+      return () => {
+        alive = false;
+      };
+    }, [])
+  );
+
+  const sticking = params.sticking || saved;
+  const hasSticking = sticking !== '' && sticking !== 'Not sure';
 
   return (
     <SafeAreaView style={styles.safe}>
       <Stack.Screen options={{ headerShown: false }} />
       <ScrollView contentContainerStyle={styles.container}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.backText}>{'<  Back'}</Text>
-        </Pressable>
-
         <Text style={styles.tag}>BENCHRISE</Text>
         <Text style={styles.title}>TECHNIQUE</Text>
         <Text style={styles.sub}>
@@ -233,9 +259,7 @@ export default function Technique() {
                 <Text style={locked ? styles.lock : styles.chevron}>{locked ? 'PRO' : isOpen ? '-' : '+'}</Text>
               </Pressable>
 
-              {locked && (
-                <Text style={styles.lockedNote}>Unlock Pro on your plan screen to read this lesson.</Text>
-              )}
+              {locked && <Text style={styles.lockedNote}>Subscribe to BenchRise Pro below to read this lesson.</Text>}
 
               {isOpen && (
                 <View style={styles.body}>
@@ -262,6 +286,12 @@ export default function Technique() {
           );
         })}
 
+        {!pro && (
+          <View style={{ marginTop: 8 }}>
+            <Paywall title="Unlock every lesson" perks={LESSON_PERKS} />
+          </View>
+        )}
+
         <Text style={styles.fine}>
           General training information, not medical advice or a substitute for in-person coaching. Warm up well, use a spotter or safeties, and stop if you feel sharp pain.
         </Text>
@@ -273,8 +303,7 @@ export default function Technique() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#050507' },
   container: { padding: 22, paddingBottom: 70 },
-  backText: { color: '#8c8c98', fontSize: 16, fontWeight: '700' },
-  tag: { color: '#ff4d2e', fontSize: 13, fontWeight: '900', letterSpacing: 5, marginTop: 20 },
+  tag: { color: '#ff4d2e', fontSize: 13, fontWeight: '900', letterSpacing: 5, marginTop: 6 },
   title: { color: '#fff', fontSize: 46, fontWeight: '900', letterSpacing: -1, marginTop: 6 },
   sub: { color: '#9a9aa6', fontSize: 15, lineHeight: 22, marginTop: 8, marginBottom: 18 },
   card: { backgroundColor: '#0d0d12', borderRadius: 16, borderWidth: 1, borderColor: '#1e1e27', marginBottom: 10, overflow: 'hidden' },
