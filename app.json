@@ -37,7 +37,15 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "BenchRise uses the camera to scan food barcodes."
+          "cameraPermission": "BenchRise uses the camera to scan food barcodes.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BenchRise uses your photos so you can add a profile picture and lift proof."
         }
       ],
       [
