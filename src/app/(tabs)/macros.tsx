@@ -2,7 +2,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Unit, fmt, loadUnit, toLb } from '../lib/units';
+import { Unit, fmt, loadUnit, toLb } from '../../lib/units';
 
 type Sex = 'Male' | 'Female' | 'Prefer not to say';
 type Goal = 'bulk' | 'maintain' | 'cut';

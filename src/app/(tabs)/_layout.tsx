@@ -9,7 +9,7 @@ export default function TabsLayout() {
         tabBarActiveTintColor: '#ff4d2e',
         tabBarInactiveTintColor: '#6b6b76',
         tabBarStyle: { backgroundColor: '#0b0b0f', borderTopColor: '#1c1c24' },
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '800' },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '800' },
       }}
     >
       <Tabs.Screen
@@ -31,13 +31,6 @@ export default function TabsLayout() {
         options={{
           title: 'Macros',
           tabBarIcon: ({ color, size }) => <Ionicons name="nutrition" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="foods"
-        options={{
-          title: 'Foods',
-          tabBarIcon: ({ color, size }) => <Ionicons name="restaurant" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
