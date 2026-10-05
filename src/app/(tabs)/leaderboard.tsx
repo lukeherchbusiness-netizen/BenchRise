@@ -1,359 +1,493 @@
 import * as ImagePicker from 'expo-image-picker';
-import { Stack, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Modal,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Unit, fmt, loadUnit, toDisplay, toLb } from '../../lib/units';
+import { supabase } from '../../lib/supabase';
+import { Unit, fmt, loadUnit, toLb } from '../../lib/units';
 
-type Division = 'Raw' | 'Wraps';
-type SortBy = 'lbs' | 'pct';
-type Filter = 'All' | Division;
-type Proof = { uri: string; type: 'image' | 'video' };
-type Profile = { username: string; avatar?: string };
-// Weights are stored in pounds and converted for display
-type Entry = {
-  id: string;
+type Row = {
+  user_id: string;
   username: string;
-  avatar?: string;
-  start: number;
-  pr: number;
-  division: Division;
-  verified: boolean;
-  proof?: Proof;
+  avatar_url: string | null;
+  division: string;
+  start_lb: number;
+  best_lb: number;
+  gain_lb: number;
+  gain_pct: number;
 };
 
-// SAMPLE DATA ONLY. Replace with real data from a backend later.
-const SAMPLE: Entry[] = [
-  { id: 's1', username: 'marcus_lifts', start: 205, pr: 275, division: 'Raw', verified: true },
-  { id: 's2', username: 'jenna.r', start: 95, pr: 145, division: 'Raw', verified: true },
-  { id: 's3', username: 'dre_press', start: 245, pr: 305, division: 'Wraps', verified: true },
-  { id: 's4', username: 'samk', start: 155, pr: 205, division: 'Raw', verified: true },
-  { id: 's5', username: 'luisbench', start: 185, pr: 225, division: 'Raw', verified: true },
-  { id: 's6', username: 'priya_n', start: 85, pr: 115, division: 'Wraps', verified: true },
-];
+type Lift = {
+  id: string;
+  user_id: string;
+  weight_lb: number;
+  reps: number;
+  division: string;
+  proof_url: string | null;
+  created_at: string;
+};
 
-const gain = (e: Entry) => e.pr - e.start;
-const pctGain = (e: Entry) => ((e.pr - e.start) / e.start) * 100;
-const RANK_COLOR = ['#ffb02e', '#c0c0cc', '#c98a5a'];
-const AVATAR_COLORS = ['#ff4d2e', '#4da3ff', '#3ddc97', '#ffb02e', '#b57bff', '#ff6ba8'];
+const isVideoUrl = (url: string) => /\.(mp4|mov)$/i.test(url);
 
-function Avatar({ name, uri, size }: { name: string; uri?: string; size: number }) {
+function Avatar({ uri, name, size }: { uri?: string | null; name?: string; size: number }) {
   if (uri) {
-    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#1c1c24' }} />;
   }
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 997;
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: AVATAR_COLORS[h % AVATAR_COLORS.length],
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <Text style={{ color: '#050507', fontWeight: '900', fontSize: size * 0.42 }}>
-        {name.charAt(0).toUpperCase()}
-      </Text>
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#1c1c24', alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: '#ff4d2e', fontSize: size / 2.4, fontWeight: '900' }}>{(name || '?').slice(0, 1).toUpperCase()}</Text>
     </View>
   );
 }
 
-function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
-  return (
-    <Pressable style={[styles.chip, on ? styles.chipOn : null]} onPress={onPress}>
-      <Text style={[styles.chipText, on ? styles.chipTextOn : null]}>{label}</Text>
-    </Pressable>
-  );
-}
+const rankColor = (i: number) => (i === 0 ? '#ffb02e' : i === 1 ? '#c9cdd6' : i === 2 ? '#d98a54' : '#5f5f6a');
 
-export default function Leaderboard() {
+export default function LeaderboardScreen() {
   const router = useRouter();
   const [unit, setUnit] = useState<Unit>('lb');
-  const [entries, setEntries] = useState<Entry[]>(SAMPLE);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [sortBy, setSortBy] = useState<SortBy>('lbs');
-  const [filter, setFilter] = useState<Filter>('All');
-  const [showForm, setShowForm] = useState(false);
-  const [username, setUsername] = useState('');
-  const [avatar, setAvatar] = useState<string | undefined>(undefined);
-  const [start, setStart] = useState('');
-  const [pr, setPr] = useState('');
-  const [division, setDivision] = useState<Division>('Raw');
-  const [proof, setProof] = useState<Proof | null>(null);
+  const [uid, setUid] = useState<string | null>(null);
+  const [hasProfile, setHasProfile] = useState(false);
+  const [division, setDivision] = useState<'raw' | 'wraps'>('raw');
+  const [sortBy, setSortBy] = useState<'lbs' | 'pct'>('lbs');
+  const [rows, setRows] = useState<Row[]>([]);
+  const [blocked, setBlocked] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    loadUnit().then(setUnit);
-  }, []);
+  // post-a-lift form
+  const [composer, setComposer] = useState(false);
+  const [wStr, setWStr] = useState('');
+  const [rStr, setRStr] = useState('1');
+  const [cDiv, setCDiv] = useState<'raw' | 'wraps'>('raw');
+  const [proof, setProof] = useState<{ uri: string; video: boolean; mime: string } | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [postMsg, setPostMsg] = useState('');
 
-  const ranked = useMemo(() => {
-    const list = entries.filter((e) => filter === 'All' || e.division === filter);
-    return [...list].sort((a, b) => (sortBy === 'lbs' ? gain(b) - gain(a) : pctGain(b) - pctGain(a)));
-  }, [entries, sortBy, filter]);
+  // lifter detail
+  const [detail, setDetail] = useState<Row | null>(null);
+  const [lifts, setLifts] = useState<Lift[]>([]);
+  const [liftsLoading, setLiftsLoading] = useState(false);
 
-  const openForm = () => {
-    if (profile) {
-      setUsername(profile.username);
-      setAvatar(profile.avatar);
+  const load = useCallback(async () => {
+    setError('');
+    const { data: s } = await supabase.auth.getSession();
+    const me = s.session?.user.id ?? null;
+    setUid(me);
+    let prof = false;
+    let blockedIds: string[] = [];
+    if (me) {
+      const p = await supabase.from('profiles').select('id').eq('id', me).maybeSingle();
+      prof = !!p.data;
+      const b = await supabase.from('blocks').select('blocked_id').eq('blocker_id', me);
+      blockedIds = (b.data ?? []).map((x: any) => x.blocked_id as string);
     }
-    setShowForm(true);
+    setHasProfile(prof);
+    setBlocked(blockedIds);
+
+    const { data, error: err } = await supabase
+      .from('leaderboard')
+      .select('*')
+      .eq('division', division)
+      .order(sortBy === 'lbs' ? 'gain_lb' : 'gain_pct', { ascending: false })
+      .limit(100);
+    if (err) setError(err.message);
+    else
+      setRows(
+        (data ?? []).map((r: any) => ({
+          ...r,
+          start_lb: Number(r.start_lb),
+          best_lb: Number(r.best_lb),
+          gain_lb: Number(r.gain_lb),
+          gain_pct: Number(r.gain_pct),
+        })) as Row[]
+      );
+  }, [division, sortBy]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      (async () => {
+        setUnit(await loadUnit());
+        setLoading(true);
+        await load();
+        if (alive) setLoading(false);
+      })();
+      return () => {
+        alive = false;
+      };
+    }, [load])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
   };
 
-  const askPermission = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setError('Allow photo access in your iPhone Settings to attach photos.');
-      return false;
-    }
-    return true;
-  };
+  const visible = rows.filter((r) => !blocked.includes(r.user_id));
 
-  const pickAvatar = async () => {
-    if (!(await askPermission())) return;
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.6,
-    });
-    if (!res.canceled && res.assets.length > 0) {
-      setAvatar(res.assets[0].uri);
-      setError('');
+  const startPost = () => {
+    if (!uid || !hasProfile) {
+      Alert.alert('Create an account first', 'Sign up and make a profile in the Me tab, then come back to post your lift.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Go to Me', onPress: () => router.push('/account') },
+      ]);
+      return;
     }
+    setPostMsg('');
+    setComposer(true);
   };
 
   const pickProof = async () => {
-    if (!(await askPermission())) return;
-    const res = await ImagePicker.launchImageLibraryAsync({
+    const r = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images', 'videos'],
       quality: 0.7,
+      videoMaxDuration: 20,
     });
-    if (!res.canceled && res.assets.length > 0) {
-      const a = res.assets[0];
-      setProof({ uri: a.uri, type: a.type === 'video' ? 'video' : 'image' });
-      setError('');
-    }
+    if (r.canceled || !r.assets?.[0]) return;
+    const a = r.assets[0];
+    const isVideo = a.type === 'video';
+    setProof({ uri: a.uri, video: isVideo, mime: a.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg') });
   };
 
-  const submit = () => {
-    const handle = username.trim().toLowerCase();
-    const s = toLb(parseFloat(start), unit);
-    const p = toLb(parseFloat(pr), unit);
-    if (!/^[a-z0-9_.]{3,20}$/.test(handle)) {
-      setError('Username must be 3 to 20 characters: letters, numbers, dots, or underscores.');
+  const postLift = async () => {
+    setPostMsg('');
+    if (!uid) return;
+    const w = parseFloat(wStr);
+    const reps = parseInt(rStr, 10);
+    if (isNaN(w) || w <= 0) {
+      setPostMsg('Enter the weight you lifted.');
       return;
     }
-    const taken = entries.some((e) => e.username === handle && (!profile || profile.username !== handle));
-    if (taken) {
-      setError('That username is taken. Try another.');
+    if (isNaN(reps) || reps < 1 || reps > 30) {
+      setPostMsg('Reps must be between 1 and 30.');
       return;
     }
-    if (!(s > 0) || !(p > 0)) {
-      setError('Enter both your starting max and your new PR.');
-      return;
-    }
-    if (p <= s) {
-      setError('Your new PR has to be higher than your starting max.');
+    const lb = toLb(w, unit);
+    if (lb >= 1500) {
+      setPostMsg('That weight looks too high. Check the number.');
       return;
     }
     if (!proof) {
-      setError('Attach a photo or video of the lift as proof.');
+      setPostMsg('Add a photo or video as proof.');
       return;
     }
-    setEntries([
-      ...entries,
-      { id: String(Date.now()), username: handle, avatar, start: s, pr: p, division, verified: false, proof },
-    ]);
-    setProfile({ username: handle, avatar });
-    setStart('');
-    setPr('');
-    setProof(null);
-    setError('');
-    setShowForm(false);
+    setPosting(true);
+    try {
+      const res = await fetch(proof.uri);
+      const buf = await res.arrayBuffer();
+      const ext = proof.video ? (proof.mime.includes('quicktime') ? 'mov' : 'mp4') : 'jpg';
+      const path = `${uid}/lift-${Date.now()}.${ext}`;
+      const up = await supabase.storage.from('proofs').upload(path, buf, { contentType: proof.mime });
+      if (up.error) throw up.error;
+      const url = supabase.storage.from('proofs').getPublicUrl(path).data.publicUrl;
+      const ins = await supabase.from('lifts').insert({
+        user_id: uid,
+        weight_lb: Math.round(lb * 100) / 100,
+        reps,
+        division: cDiv,
+        proof_url: url,
+      });
+      if (ins.error) throw ins.error;
+      setComposer(false);
+      setWStr('');
+      setRStr('1');
+      setProof(null);
+      setDivision(cDiv);
+      await load();
+    } catch (e: any) {
+      setPostMsg(e?.message ?? 'Could not post your lift.');
+    }
+    setPosting(false);
   };
 
-  const gainText = (e: Entry) =>
-    sortBy === 'lbs' ? String(Math.round(toDisplay(gain(e), unit) * 10) / 10) : pctGain(e).toFixed(1);
+  const openDetail = async (row: Row) => {
+    setDetail(row);
+    setLifts([]);
+    setLiftsLoading(true);
+    const { data } = await supabase
+      .from('lifts')
+      .select('id, user_id, weight_lb, reps, division, proof_url, created_at')
+      .eq('user_id', row.user_id)
+      .eq('division', division)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    setLifts(((data ?? []) as any[]).map((l) => ({ ...l, weight_lb: Number(l.weight_lb) })) as Lift[]);
+    setLiftsLoading(false);
+  };
+
+  const reportLift = (lift: Lift) => {
+    const send = async (reason: string) => {
+      if (!uid) {
+        Alert.alert('Log in first', 'Create an account in the Me tab to report content.');
+        return;
+      }
+      const { error: err } = await supabase
+        .from('reports')
+        .insert({ reporter_id: uid, lift_id: lift.id, reported_user_id: lift.user_id, reason });
+      Alert.alert(err ? 'Could not send report' : 'Report sent', err ? err.message : 'Thanks. We will review it.');
+    };
+    Alert.alert('Report this lift', 'Why are you reporting it?', [
+      { text: 'Fake or edited proof', onPress: () => send('fake_proof') },
+      { text: 'Inappropriate content', onPress: () => send('inappropriate') },
+      { text: 'Spam or abuse', onPress: () => send('spam') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const blockUser = (row: Row) => {
+    if (!uid) {
+      Alert.alert('Log in first', 'Create an account in the Me tab to block users.');
+      return;
+    }
+    Alert.alert(`Block @${row.username}?`, 'You will no longer see their lifts.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Block',
+        style: 'destructive',
+        onPress: async () => {
+          const { error: err } = await supabase.from('blocks').insert({ blocker_id: uid, blocked_id: row.user_id });
+          if (err) Alert.alert('Could not block', err.message);
+          else {
+            setDetail(null);
+            await load();
+          }
+        },
+      },
+    ]);
+  };
+
+  const deleteLift = (lift: Lift) => {
+    Alert.alert('Delete this lift?', 'This removes it and its proof.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error: err } = await supabase.from('lifts').delete().eq('id', lift.id);
+          if (err) {
+            Alert.alert('Could not delete', err.message);
+            return;
+          }
+          if (lift.proof_url && lift.proof_url.includes('/proofs/')) {
+            const path = lift.proof_url.split('/proofs/')[1];
+            if (path) await supabase.storage.from('proofs').remove([path]);
+          }
+          setLifts(lifts.filter((l) => l.id !== lift.id));
+          await load();
+        },
+      },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.backText}>{'<  Back'}</Text>
+      <ScrollView
+        contentContainerStyle={styles.pad}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff4d2e" />}
+      >
+        <Text style={styles.title}>LEADERBOARD</Text>
+        <Text style={styles.sub}>Ranked by the biggest bench gain since each lifter's first posted lift. Proof required.</Text>
+
+        <Pressable style={styles.cta} onPress={startPost}>
+          <Text style={styles.ctaText}>POST A LIFT</Text>
         </Pressable>
 
-        <Text style={styles.tag}>BENCHRISE</Text>
-        <Text style={styles.title}>LEADERBOARD</Text>
-        <Text style={styles.sub}>Ranked by who added the most weight to their bench. Every PR needs photo or video proof.</Text>
-
-        <View style={styles.demo}>
-          <Text style={styles.demoText}>Demo mode: these are sample lifters, and your submissions stay on this phone until the online version is built.</Text>
-        </View>
-
-        <Text style={styles.label}>RANK BY</Text>
-        <View style={styles.chipRow}>
-          <Chip label={`Most ${unit} gained`} on={sortBy === 'lbs'} onPress={() => setSortBy('lbs')} />
-          <Chip label="Most % gained" on={sortBy === 'pct'} onPress={() => setSortBy('pct')} />
-        </View>
-
-        <Text style={styles.label}>DIVISION</Text>
-        <View style={styles.chipRow}>
-          {(['All', 'Raw', 'Wraps'] as Filter[]).map((f) => (
-            <Chip key={f} label={f} on={filter === f} onPress={() => setFilter(f)} />
+        <View style={styles.toggle}>
+          {(['raw', 'wraps'] as const).map((d) => (
+            <Pressable key={d} style={[styles.toggleBtn, division === d && styles.toggleOn]} onPress={() => setDivision(d)}>
+              <Text style={[styles.toggleText, division === d && styles.toggleTextOn]}>{d === 'raw' ? 'RAW' : 'WRAPS'}</Text>
+            </Pressable>
           ))}
         </View>
-
-        <View style={{ marginTop: 18 }}>
-          {ranked.map((e, i) => (
-            <View key={e.id} style={[styles.row, i === 0 ? styles.rowFirst : null]}>
-              <Text style={[styles.rank, { color: RANK_COLOR[i] ?? '#6a6a75' }]}>{i + 1}</Text>
-              <View style={styles.avatarWrap}>
-                <Avatar name={e.username} uri={e.avatar} size={44} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name} numberOfLines={1}>@{e.username}</Text>
-                <Text style={styles.meta}>
-                  {e.division}  |  {fmt(e.start, unit)} {'>'} {fmt(e.pr, unit)} {unit}
-                </Text>
-                <Text style={e.verified ? styles.badgeOk : styles.badgePending}>
-                  {e.verified ? 'VERIFIED' : 'PENDING REVIEW'}
-                </Text>
-              </View>
-              {e.proof && e.proof.type === 'image' && (
-                <Image source={{ uri: e.proof.uri }} style={styles.thumb} />
-              )}
-              {e.proof && e.proof.type === 'video' && (
-                <View style={[styles.thumb, styles.thumbVideo]}>
-                  <Text style={styles.thumbVideoText}>VIDEO</Text>
-                </View>
-              )}
-              <View style={styles.gainBox}>
-                <Text style={styles.gain}>+{gainText(e)}</Text>
-                <Text style={styles.gainUnit}>{sortBy === 'lbs' ? unit : '%'}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        {!showForm ? (
-          <Pressable style={styles.button} onPress={openForm}>
-            <Text style={styles.buttonText}>SUBMIT A PR</Text>
+        <View style={styles.toggle}>
+          <Pressable style={[styles.toggleBtn, sortBy === 'lbs' && styles.toggleOn]} onPress={() => setSortBy('lbs')}>
+            <Text style={[styles.toggleText, sortBy === 'lbs' && styles.toggleTextOn]}>{unit === 'kg' ? 'KG GAINED' : 'LBS GAINED'}</Text>
           </Pressable>
-        ) : (
-          <View style={styles.form}>
-            <Text style={styles.formTitle}>Submit a PR</Text>
+          <Pressable style={[styles.toggleBtn, sortBy === 'pct' && styles.toggleOn]} onPress={() => setSortBy('pct')}>
+            <Text style={[styles.toggleText, sortBy === 'pct' && styles.toggleTextOn]}>% GAINED</Text>
+          </Pressable>
+        </View>
 
-            <View style={styles.profileRow}>
-              <Pressable onPress={pickAvatar}>
-                <Avatar name={username.trim() || '?'} uri={avatar} size={72} />
-              </Pressable>
-              <View style={{ flex: 1, marginLeft: 16 }}>
-                <Text style={styles.labelTight}>USERNAME</Text>
-                <TextInput
-                  style={styles.input}
-                  value={username}
-                  onChangeText={setUsername}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="your_username"
-                  placeholderTextColor="#444450"
-                />
-                <Pressable onPress={pickAvatar}>
-                  <Text style={styles.link}>{avatar ? 'Change profile picture' : 'Add profile picture'}</Text>
-                </Pressable>
-              </View>
-            </View>
-
-            <View style={styles.twoCol}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>STARTING MAX ({unit.toUpperCase()})</Text>
-                <TextInput style={styles.input} value={start} onChangeText={setStart} keyboardType="decimal-pad" placeholder={unit === 'kg' ? '100' : '225'} placeholderTextColor="#444450" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>NEW PR ({unit.toUpperCase()})</Text>
-                <TextInput style={styles.input} value={pr} onChangeText={setPr} keyboardType="decimal-pad" placeholder={unit === 'kg' ? '110' : '245'} placeholderTextColor="#444450" />
-              </View>
-            </View>
-
-            <Text style={styles.label}>DIVISION</Text>
-            <View style={styles.chipRow}>
-              <Chip label="Raw" on={division === 'Raw'} onPress={() => setDivision('Raw')} />
-              <Chip label="Wraps" on={division === 'Wraps'} onPress={() => setDivision('Wraps')} />
-            </View>
-
-            <Pressable style={styles.proofBtn} onPress={pickProof}>
-              <Text style={styles.proofText}>
-                {proof ? (proof.type === 'video' ? 'Video attached. Tap to change' : 'Photo attached. Tap to change') : 'Attach photo or video proof'}
-              </Text>
-            </Pressable>
-            {proof && proof.type === 'image' && <Image source={{ uri: proof.uri }} style={styles.preview} />}
-
-            {error !== '' && <Text style={styles.error}>{error}</Text>}
-
-            <Pressable style={styles.button} onPress={submit}>
-              <Text style={styles.buttonText}>POST MY LIFT</Text>
-            </Pressable>
-            <Pressable onPress={() => { setShowForm(false); setError(''); }}>
-              <Text style={[styles.backText, { textAlign: 'center', marginTop: 16 }]}>Cancel</Text>
-            </Pressable>
-          </View>
+        {loading && <ActivityIndicator color="#ff4d2e" style={{ marginTop: 30 }} />}
+        {error !== '' && <Text style={styles.err}>{error}</Text>}
+        {!loading && error === '' && visible.length === 0 && (
+          <Text style={styles.empty}>No lifts here yet. Be the first on the board.</Text>
         )}
 
-        <Text style={styles.fine}>
-          In the live version, a lift only counts after it is reviewed. The video should show the full lift, the plates, and the bar being racked. Wrapped lifts rank in their own division. Only your username and profile picture are shown publicly, never your real name or email.
-        </Text>
+        {visible.map((r, i) => (
+          <Pressable key={r.user_id + r.division} style={styles.row} onPress={() => openDetail(r)}>
+            <Text style={[styles.rank, { color: rankColor(i) }]}>{i + 1}</Text>
+            <Avatar uri={r.avatar_url} name={r.username} size={44} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.rowName}>@{r.username}</Text>
+              <Text style={styles.rowMeta}>
+                {fmt(r.start_lb, unit)} → {fmt(r.best_lb, unit)} {unit} est. 1RM
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={styles.gain}>
+                +{fmt(r.gain_lb, unit)} {unit}
+              </Text>
+              <Text style={styles.pct}>+{r.gain_pct}%</Text>
+            </View>
+          </Pressable>
+        ))}
       </ScrollView>
+
+      {/* POST A LIFT */}
+      <Modal visible={composer} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setComposer(false)}>
+        <SafeAreaView style={styles.safe}>
+          <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
+            <Text style={styles.title}>POST A LIFT</Text>
+            <Text style={styles.sub}>Your first post sets your starting point. Post heavier lifts later to climb.</Text>
+            <View style={styles.card}>
+              <Text style={styles.label}>Weight ({unit})</Text>
+              <TextInput style={styles.input} keyboardType="numeric" value={wStr} onChangeText={setWStr} placeholder="e.g. 225" placeholderTextColor="#5f5f6a" />
+              <Text style={styles.label}>Reps</Text>
+              <TextInput style={styles.input} keyboardType="numeric" value={rStr} onChangeText={setRStr} placeholder="1" placeholderTextColor="#5f5f6a" />
+              <Text style={styles.label}>Division</Text>
+              <View style={[styles.toggle, { marginTop: 4 }]}>
+                {(['raw', 'wraps'] as const).map((d) => (
+                  <Pressable key={d} style={[styles.toggleBtn, cDiv === d && styles.toggleOn]} onPress={() => setCDiv(d)}>
+                    <Text style={[styles.toggleText, cDiv === d && styles.toggleTextOn]}>{d === 'raw' ? 'RAW' : 'WRAPS'}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable style={styles.ghost} onPress={pickProof}>
+                <Text style={styles.ghostText}>{proof ? 'CHANGE PROOF' : 'ADD PHOTO OR VIDEO PROOF'}</Text>
+              </Pressable>
+              {proof && !proof.video && <Image source={{ uri: proof.uri }} style={styles.preview} />}
+              {proof && proof.video && <Text style={styles.videoNote}>Video selected (up to 20 seconds)</Text>}
+              {postMsg !== '' && <Text style={styles.err}>{postMsg}</Text>}
+              <Pressable style={styles.cta} onPress={postLift} disabled={posting}>
+                {posting ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaText}>SUBMIT LIFT</Text>}
+              </Pressable>
+              <Pressable style={styles.ghost} onPress={() => setComposer(false)}>
+                <Text style={styles.ghostText}>CANCEL</Text>
+              </Pressable>
+              <Text style={styles.fine}>Fake or edited proof gets removed and can get your account banned.</Text>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* LIFTER DETAIL */}
+      <Modal visible={!!detail} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setDetail(null)}>
+        <SafeAreaView style={styles.safe}>
+          <ScrollView contentContainerStyle={styles.pad}>
+            {detail && (
+              <>
+                <View style={{ alignItems: 'center', marginBottom: 14 }}>
+                  <Avatar uri={detail.avatar_url} name={detail.username} size={80} />
+                  <Text style={styles.detailName}>@{detail.username}</Text>
+                  <Text style={styles.gain}>
+                    +{fmt(detail.gain_lb, unit)} {unit} ({detail.gain_pct}%)
+                  </Text>
+                </View>
+                {liftsLoading && <ActivityIndicator color="#ff4d2e" />}
+                {lifts.map((l) => (
+                  <View key={l.id} style={styles.card}>
+                    <Text style={styles.rowName}>
+                      {fmt(l.weight_lb, unit)} {unit} × {l.reps}
+                    </Text>
+                    <Text style={styles.rowMeta}>{new Date(l.created_at).toLocaleDateString()}</Text>
+                    {l.proof_url && !isVideoUrl(l.proof_url) && <Image source={{ uri: l.proof_url }} style={styles.preview} />}
+                    {l.proof_url && isVideoUrl(l.proof_url) && (
+                      <Pressable style={styles.ghost} onPress={() => Linking.openURL(l.proof_url as string)}>
+                        <Text style={styles.ghostText}>WATCH VIDEO PROOF</Text>
+                      </Pressable>
+                    )}
+                    {l.user_id === uid ? (
+                      <Pressable style={styles.danger} onPress={() => deleteLift(l)}>
+                        <Text style={styles.dangerText}>DELETE MY LIFT</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable style={styles.ghost} onPress={() => reportLift(l)}>
+                        <Text style={styles.ghostText}>REPORT THIS LIFT</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                ))}
+                {detail.user_id !== uid && (
+                  <Pressable style={styles.danger} onPress={() => blockUser(detail)}>
+                    <Text style={styles.dangerText}>BLOCK @{detail.username}</Text>
+                  </Pressable>
+                )}
+                <Pressable style={styles.ghost} onPress={() => setDetail(null)}>
+                  <Text style={styles.ghostText}>CLOSE</Text>
+                </Pressable>
+              </>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-const glow = { shadowColor: '#ff4d2e', shadowOpacity: 0.55, shadowRadius: 18, shadowOffset: { width: 0, height: 6 }, elevation: 10 };
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#050507' },
-  container: { padding: 22, paddingBottom: 70 },
-  backText: { color: '#8c8c98', fontSize: 16, fontWeight: '700' },
-  tag: { color: '#ff4d2e', fontSize: 13, fontWeight: '900', letterSpacing: 5, marginTop: 20 },
-  title: { color: '#fff', fontSize: 46, fontWeight: '900', letterSpacing: -1, marginTop: 6 },
-  sub: { color: '#9a9aa6', fontSize: 15, lineHeight: 22, marginTop: 8 },
-  demo: { backgroundColor: '#17140d', borderRadius: 12, borderWidth: 1, borderColor: '#352d1a', padding: 12, marginTop: 16 },
-  demoText: { color: '#e5d6a8', fontSize: 13, lineHeight: 18 },
-  label: { color: '#7d7d89', fontSize: 11, fontWeight: '800', letterSpacing: 2, marginTop: 18, marginBottom: 8 },
-  labelTight: { color: '#7d7d89', fontSize: 11, fontWeight: '800', letterSpacing: 2, marginBottom: 8 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1.5, borderColor: '#1e1e27', backgroundColor: '#0d0d12', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
-  chipOn: { borderColor: '#ff4d2e', backgroundColor: '#24120d' },
-  chipText: { color: '#8c8c98', fontSize: 14, fontWeight: '800' },
-  chipTextOn: { color: '#fff' },
-  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0d0d12', borderRadius: 16, borderWidth: 1, borderColor: '#1e1e27', padding: 12, marginBottom: 10 },
-  rowFirst: { borderColor: '#ffb02e', backgroundColor: '#17130a' },
-  rank: { width: 28, fontSize: 24, fontWeight: '900' },
-  avatarWrap: { marginRight: 12 },
-  name: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  badgeOk: { color: '#3ddc97', fontSize: 9, fontWeight: '900', letterSpacing: 1, marginTop: 3 },
-  badgePending: { color: '#ffb02e', fontSize: 9, fontWeight: '900', letterSpacing: 1, marginTop: 3 },
-  meta: { color: '#8c8c98', fontSize: 12, fontWeight: '600', marginTop: 2 },
-  thumb: { width: 34, height: 34, borderRadius: 8, marginHorizontal: 8 },
-  thumbVideo: { backgroundColor: '#1e1e27', alignItems: 'center', justifyContent: 'center' },
-  thumbVideoText: { color: '#cfcfd6', fontSize: 8, fontWeight: '900' },
-  gainBox: { alignItems: 'flex-end', minWidth: 56 },
-  gain: { color: '#ff4d2e', fontSize: 24, fontWeight: '900' },
-  gainUnit: { color: '#8c8c98', fontSize: 12, fontWeight: '800', marginTop: -2 },
-  button: { backgroundColor: '#ff4d2e', borderRadius: 14, paddingVertical: 18, alignItems: 'center', marginTop: 20, ...glow },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 1.5 },
-  form: { backgroundColor: '#0d0d12', borderRadius: 20, borderWidth: 1.5, borderColor: '#ff4d2e', padding: 20, marginTop: 20 },
-  formTitle: { color: '#fff', fontSize: 24, fontWeight: '900', marginBottom: 16 },
-  profileRow: { flexDirection: 'row', alignItems: 'center' },
-  link: { color: '#ff8a70', fontSize: 13, fontWeight: '800', marginTop: 8 },
-  input: { backgroundColor: '#101016', color: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#2a2a34', paddingHorizontal: 14, paddingVertical: 12, fontSize: 18, fontWeight: '700' },
-  twoCol: { flexDirection: 'row', gap: 10 },
-  proofBtn: { borderWidth: 1.5, borderColor: '#2a2a34', borderStyle: 'dashed', borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 18 },
-  proofText: { color: '#cfcfd6', fontSize: 15, fontWeight: '800' },
-  preview: { width: '100%', height: 180, borderRadius: 12, marginTop: 12 },
-  error: { color: '#ff6b6b', fontSize: 14, fontWeight: '700', marginTop: 14 },
-  fine: { color: '#5f5f6a', fontSize: 12, lineHeight: 17, marginTop: 22 },
+  pad: { padding: 18, paddingBottom: 40 },
+  title: { color: '#fff', fontSize: 26, fontWeight: '900', letterSpacing: 2, marginBottom: 6 },
+  sub: { color: '#8a8a96', fontSize: 13, lineHeight: 19, marginBottom: 14 },
+  card: { backgroundColor: '#0f0f14', borderColor: '#1c1c24', borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 14 },
+  label: { color: '#8a8a96', fontSize: 11, fontWeight: '800', marginBottom: 4, marginTop: 10, letterSpacing: 1 },
+  input: {
+    backgroundColor: '#17171d',
+    borderColor: '#262630',
+    borderWidth: 1,
+    borderRadius: 12,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  cta: { backgroundColor: '#ff4d2e', borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 8, marginBottom: 12 },
+  ctaText: { color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 1.5 },
+  ghost: { backgroundColor: '#1c1c24', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
+  ghostText: { color: '#fff', fontSize: 13, fontWeight: '900', letterSpacing: 1.5 },
+  danger: { borderColor: '#ff6b6b', borderWidth: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
+  dangerText: { color: '#ff6b6b', fontSize: 13, fontWeight: '900', letterSpacing: 1.5 },
+  toggle: { flexDirection: 'row', backgroundColor: '#17171d', borderRadius: 12, padding: 4, marginBottom: 10 },
+  toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 9 },
+  toggleOn: { backgroundColor: '#ff4d2e' },
+  toggleText: { color: '#8a8a96', fontSize: 12, fontWeight: '900', letterSpacing: 1.2 },
+  toggleTextOn: { color: '#fff' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f0f14',
+    borderColor: '#1c1c24',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 10,
+  },
+  rank: { width: 30, fontSize: 20, fontWeight: '900', textAlign: 'center', marginRight: 6 },
+  rowName: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  rowMeta: { color: '#8a8a96', fontSize: 12, fontWeight: '600', marginTop: 2 },
+  gain: { color: '#ffb02e', fontSize: 17, fontWeight: '900' },
+  pct: { color: '#8a8a96', fontSize: 12, fontWeight: '700', marginTop: 2 },
+  empty: { color: '#6b6b76', fontSize: 15, textAlign: 'center', marginTop: 30 },
+  err: { color: '#ff6b6b', fontSize: 13, fontWeight: '700', marginTop: 10 },
+  fine: { color: '#5f5f6a', fontSize: 12, marginTop: 4, lineHeight: 17 },
+  preview: { width: '100%', height: 220, borderRadius: 12, marginTop: 12, backgroundColor: '#1c1c24' },
+  videoNote: { color: '#ffb02e', fontSize: 13, fontWeight: '800', marginTop: 12 },
+  detailName: { color: '#fff', fontSize: 22, fontWeight: '900', marginTop: 10 },
 });
