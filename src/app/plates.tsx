@@ -7,6 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const UNIT_KEY = 'benchrise.unit.v1';
 
 type Unit = 'lb' | 'kg';
+type PlateLine = { plate: number; count: number; color: string };
+type PlateResult =
+  | { error: string }
+  | { plates: PlateLine[]; leftover: number; loaded: number }
+  | null;
 
 const PLATES: Record<Unit, number[]> = {
   lb: [45, 35, 25, 10, 5, 2.5],
@@ -38,14 +43,14 @@ export default function Plates() {
     load();
   }, []);
 
-  const result = useMemo(() => {
+  const result = useMemo<PlateResult>(() => {
     const t = parseFloat(target);
     if (!(t > 0)) return null;
     if (t > 1500) return { error: 'That is more than a bar can hold. Try a lower number.' };
     if (t < bar) return { error: `The empty bar already weighs ${bar} ${unit}.` };
 
     let rem = Math.round(((t - bar) / 2) * 100);
-    const out: { plate: number; count: number; color: string }[] = [];
+    const out: PlateLine[] = [];
     PLATES[unit].forEach((p, i) => {
       const p100 = Math.round(p * 100);
       const count = Math.floor(rem / p100);

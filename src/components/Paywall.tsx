@@ -3,8 +3,8 @@ import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } 
 import { buy, getPackages, Packages, restore } from '../lib/purchases';
 
 // TODO: replace these with your real hosted pages before submitting to Apple.
-const TERMS_URL = 'https://example.com/terms';
-const PRIVACY_URL = 'https://example.com/privacy';
+const TERMS_URL = 'https://lukeherchbusiness-netizen.github.io/benchrise-legal/terms.html';
+const PRIVACY_URL = 'https://lukeherchbusiness-netizen.github.io/benchrise-legal/privacy.html';
 
 const DEFAULT_PERKS = ['Every week of your full program', 'Auto deloads and test week attempts', 'All technique lessons', 'Food tracker with barcode scan'];
 
