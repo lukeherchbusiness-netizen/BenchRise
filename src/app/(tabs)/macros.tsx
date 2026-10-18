@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Unit, fmt, loadUnit, toLb } from '../../lib/units';
 
@@ -21,6 +21,44 @@ const GOALS: { id: Goal; label: string; sub: string }[] = [
 ];
 
 const SEXES: Sex[] = ['Male', 'Female', 'Prefer not to say'];
+
+const SOURCES: { topic: string; cite: string; url: string }[] = [
+  {
+    topic: 'CALORIE ESTIMATE',
+    cite: 'Mifflin MD, et al. A new predictive equation for resting energy expenditure in healthy individuals. Am J Clin Nutr. 1990;51(2):241-247.',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/2305711/',
+  },
+  {
+    topic: 'ACTIVITY MULTIPLIER',
+    cite: 'FAO/WHO/UNU. Human energy requirements (2001). Daily energy needs are resting energy multiplied by a physical activity level.',
+    url: 'https://www.fao.org/4/y5686e/y5686e07.htm',
+  },
+  {
+    topic: 'SURPLUS AND DEFICIT',
+    cite: 'Aragon AA, et al. International Society of Sports Nutrition position stand: diets and body composition. J Int Soc Sports Nutr. 2017;14:16.',
+    url: 'https://pmc.ncbi.nlm.nih.gov/articles/PMC5470183/',
+  },
+  {
+    topic: 'PROTEIN',
+    cite: 'Jager R, et al. International Society of Sports Nutrition position stand: protein and exercise. J Int Soc Sports Nutr. 2017;14:20.',
+    url: 'https://link.springer.com/article/10.1186/s12970-017-0177-8',
+  },
+  {
+    topic: 'PROTEIN',
+    cite: 'Morton RW, et al. A systematic review, meta-analysis and meta-regression of the effect of protein supplementation on resistance training-induced gains in muscle mass and strength in healthy adults. Br J Sports Med. 2018;52(6):376-384.',
+    url: 'https://doi.org/10.1136/bjsports-2017-097608',
+  },
+  {
+    topic: 'PROTEIN WHILE CUTTING',
+    cite: 'Helms ER, et al. A systematic review of dietary protein during caloric restriction in resistance trained lean athletes: a case for higher intakes. Int J Sport Nutr Exerc Metab. 2014;24(2):127-138.',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/24092765/',
+  },
+  {
+    topic: 'FAT',
+    cite: 'Dietary Guidelines for Americans. Healthy fat intake is about 20 to 35 percent of daily calories. Your fat target is a starting point near the low end of that range.',
+    url: 'https://www.dietaryguidelines.gov/',
+  },
+];
 
 const round = (x: number, step: number) => Math.round(x / step) * step;
 
@@ -232,8 +270,22 @@ export default function Macros() {
           </View>
         )}
 
+        <View style={styles.sourcesCard}>
+          <Text style={styles.srcHeading}>SOURCES</Text>
+          <Text style={styles.srcIntro}>
+            Where these numbers come from. Calories use the Mifflin-St Jeor equation times an activity multiplier, with about 10% extra to build and 15% less to lose fat. Protein is about 1.0 g per lb (1.1 g per lb when losing fat), which sits at the upper end of the ranges studied for lifters. Tap a source to read it.
+          </Text>
+          {SOURCES.map((s, i) => (
+            <Pressable key={i} style={styles.srcItem} onPress={() => Linking.openURL(s.url).catch(() => {})}>
+              <Text style={styles.srcTopic}>{s.topic}</Text>
+              <Text style={styles.srcCite}>{s.cite}</Text>
+              <Text style={styles.srcLink}>{s.url}</Text>
+            </Pressable>
+          ))}
+        </View>
+
         <Text style={styles.fine}>
-          These are estimates from a standard formula (Mifflin-St Jeor), not medical advice. Real needs vary. Talk to a doctor or registered dietitian first if you have a medical condition, are pregnant or nursing, take medication that affects appetite or weight, or have a history of disordered eating.
+          These are estimates from standard formulas, not medical advice. Real needs vary. Talk to a doctor or registered dietitian first if you have a medical condition, are pregnant or nursing, take medication that affects appetite or weight, or have a history of disordered eating.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -282,5 +334,12 @@ const styles = StyleSheet.create({
   warn: { color: '#ffb02e', fontSize: 13, lineHeight: 19, fontWeight: '700', marginTop: 14 },
   tipTitle: { color: '#7d7d89', fontSize: 11, fontWeight: '800', letterSpacing: 2, marginTop: 20 },
   tip: { color: '#b5b5c0', fontSize: 14, lineHeight: 21, marginTop: 8 },
+  sourcesCard: { backgroundColor: '#0d0d12', borderRadius: 18, borderWidth: 1, borderColor: '#1e1e27', padding: 18, marginTop: 24 },
+  srcHeading: { color: '#ff4d2e', fontSize: 12, fontWeight: '900', letterSpacing: 3 },
+  srcIntro: { color: '#9a9aa6', fontSize: 13, lineHeight: 19, marginTop: 8 },
+  srcItem: { borderTopWidth: 1, borderTopColor: '#1c1c24', paddingTop: 12, marginTop: 12 },
+  srcTopic: { color: '#7d7d89', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
+  srcCite: { color: '#b5b5c0', fontSize: 13, lineHeight: 19, marginTop: 4 },
+  srcLink: { color: '#4da3ff', fontSize: 12, lineHeight: 17, marginTop: 4, textDecorationLine: 'underline' },
   fine: { color: '#5f5f6a', fontSize: 12, lineHeight: 17, marginTop: 22 },
 });
